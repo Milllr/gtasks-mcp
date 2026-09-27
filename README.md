@@ -131,6 +131,19 @@ MCP_PASSWORD=...
 SIGNING_SECRET=...
 ```
 
+## Verifying it works
+
+`scripts/smoke-test.mjs` walks the exact handshake Claude performs: discovery,
+dynamic registration, the PKCE authorize round trip, token exchange, the
+refresh grant, and an authorized `tools/list`. It also checks that a wrong
+password and a bad PKCE verifier are both rejected.
+
+```powershell
+node scripts/smoke-test.mjs https://gtasks-mcp.<your-subdomain>.workers.dev <your-password>
+```
+
+It never calls a tool, so it cannot touch your real tasks.
+
 ## Troubleshooting
 
 **"Could not refresh the Google access token"** usually means the refresh token
