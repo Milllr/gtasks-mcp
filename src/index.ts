@@ -36,12 +36,17 @@ export default {
     }
 
     const missing = REQUIRED.filter((key) => !env[key]);
-    if (missing.length > 0 && path !== "/") {
-      return Response.json(
-        { error: "server_not_configured", missing_secrets: missing },
-        { status: 500 },
-      );
-    }
+    // Discovery always answers. The OAuth dance needs only the two local
+    // secrets; the Google ones are not touched until a tool actually runs.
+    const notConfigured = (keys: (keyof Env)[]): Response | null => {
+      const gaps = keys.filter((key) => !env[key]);
+      return gaps.length === 0
+        ? null
+        : Response.json(
+            { error: "server_not_configured", missing_secrets: gaps },
+            { status: 500 },
+          );
+    };
 
     // Discovery. Claude appends the resource path to the well-known lookup,
     // so both spellings are answered.
@@ -52,11 +57,18 @@ export default {
       return authorizationServerMetadata(origin);
     }
 
-    if (path === "/register" && request.method === "POST") return register(request, env);
-    if (path === "/authorize") return authorize(request, env);
-    if (path === "/token" && request.method === "POST") return token(request, env);
+    if (path === "/register" || path === "/authorize" || path === "/token") {
+      const gate = notConfigured(["MCP_PASSWORD", "SIGNING_SECRET"]);
+      if (gate) return gate;
+      if (path === "/register" && request.method === "POST") return register(request, env);
+      if (path === "/authorize") return authorize(request, env);
+      if (path === "/token" && request.method === "POST") return token(request, env);
+      return new Response("Method not allowed", { status: 405 });
+    }
 
     if (path === "/mcp") {
+      const gate = notConfigured(REQUIRED);
+      if (gate) return gate;
       if (!(await isAuthorized(request, env))) return unauthorized(origin);
       if (request.method === "POST") {
         const response = await handleRpc(request, env);
