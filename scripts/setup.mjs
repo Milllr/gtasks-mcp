@@ -35,9 +35,14 @@ function putSecret(name, value) {
   });
 }
 
-function run(command, args) {
+/**
+ * `shell` defaults on for Windows because npx resolves through a .cmd shim.
+ * Pass false for anything given as an absolute path: node lives under
+ * C:\Program Files, and a shell would split that at the space.
+ */
+function run(command, args, useShell = process.platform === "win32") {
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: "inherit", shell: process.platform === "win32" });
+    const child = spawn(command, args, { stdio: "inherit", shell: useShell });
     child.on("close", resolve);
   });
 }
@@ -111,7 +116,7 @@ async function main() {
   }
 
   console.log(`\nSmoke testing ${url}`);
-  const failed = await run(process.execPath, ["scripts/smoke-test.mjs", url, password]);
+  const failed = await run(process.execPath, ["scripts/smoke-test.mjs", url, password], false);
 
   if (failed) {
     console.log("\nSomething is off. `npx wrangler tail` will show you live logs.");
