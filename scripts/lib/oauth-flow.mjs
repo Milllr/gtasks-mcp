@@ -32,8 +32,12 @@ export function ask(question, { mask = false } = {}) {
 }
 
 function openBrowser(url) {
+  // Not `cmd /c start`: cmd treats & as a command separator, so it would hand
+  // the browser everything up to the first query parameter and drop the rest,
+  // which Google rejects as a missing response_type. rundll32 takes the URL as
+  // a single argument and does no parsing of its own.
   const [command, args] =
-    process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+    process.platform === "win32" ? ["rundll32.exe", ["url.dll,FileProtocolHandler", url]]
     : process.platform === "darwin" ? ["open", [url]]
     : ["xdg-open", [url]];
   try {
