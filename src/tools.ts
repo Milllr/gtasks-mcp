@@ -39,6 +39,23 @@ export const TOOLS: ToolDefinition[] = [
     },
   },
   {
+    name: "export_all",
+    title: "Export everything as JSON",
+    description:
+      "Dump every list and every task, including completed ones, as raw JSON. " +
+      "Intended for backups and migrations rather than day to day use.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        lists: {
+          type: "array",
+          items: { type: "string" },
+          description: "Limit to these list names or ids. Omit for everything.",
+        },
+      },
+    },
+  },
+  {
     name: "create_task",
     title: "Create task",
     description: "Add a task to a list, optionally with notes, a due date, or a parent task.",
@@ -52,6 +69,54 @@ export const TOOLS: ToolDefinition[] = [
         parent_task_id: str("Id of an existing task, to add this as a subtask."),
       },
       required: ["list", "title"],
+    },
+  },
+  {
+    name: "create_tasks",
+    title: "Create many tasks",
+    description:
+      "Add several tasks to one list in a single call, in the order given. Use this " +
+      "for bulk work such as importing a list or porting history, rather than calling " +
+      "create_task repeatedly. Each item may carry notes, a due date, a completed " +
+      "status with its original completion date, and subtasks of its own.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        list: str("List name or id."),
+        tasks: {
+          type: "array",
+          maxItems: 50,
+          description: "Tasks to create, in the order they should appear.",
+          items: {
+            type: "object",
+            properties: {
+              title: str("The task title."),
+              notes: str("Notes for this task."),
+              due: str("Due date: 'today', 'tomorrow', or YYYY-MM-DD."),
+              completed_at: str(
+                "Mark this task done, with this original completion date " +
+                "(YYYY-MM-DD or a full RFC3339 timestamp). Use for imported history.",
+              ),
+              subtasks: {
+                type: "array",
+                maxItems: 50,
+                description: "Child tasks nested under this one.",
+                items: {
+                  type: "object",
+                  properties: {
+                    title: str("The subtask title."),
+                    notes: str("Notes for this subtask."),
+                    completed_at: str("Original completion date, to import it as done."),
+                  },
+                  required: ["title"],
+                },
+              },
+            },
+            required: ["title"],
+          },
+        },
+      },
+      required: ["list", "tasks"],
     },
   },
   {
@@ -210,6 +275,27 @@ export async function callTool(
       return text(hits.length === 0 ? `Nothing matches "${query}".` : hits.join("\n\n"));
     }
 
+    case "export_all": {
+      const wanted = Array.isArray(args.lists) ? (args.lists as string[]) : null;
+      const all = await g.listTaskLists(env);
+      const chosen = wanted
+        ? await Promise.all(wanted.map((name) => g.resolveList(env, name)))
+        : all;
+
+      const payload = {
+        exported_at: new Date().toISOString(),
+        lists: [] as unknown[],
+      };
+      for (const list of chosen) {
+        const tasks = await g.listTasks(env, list.id, {
+          showCompleted: true,
+          showHidden: true,
+        });
+        payload.lists.push({ id: list.id, title: list.title, tasks });
+      }
+      return text(JSON.stringify(payload));
+    }
+
     case "create_task": {
       const list = await g.resolveList(env, S(args, "list") ?? "");
       const due = S(args, "due");
@@ -226,6 +312,74 @@ export async function callTool(
       return text(
         `Added to "${list.title}":\n${renderTask(created)}`,
       );
+    }
+
+    case "create_tasks": {
+      const list = await g.resolveList(env, S(args, "list") ?? "");
+      const items = Array.isArray(args.tasks) ? (args.tasks as Record<string, unknown>[]) : [];
+      if (items.length === 0) return text("No tasks were given, so nothing was created.");
+
+      const made: string[] = [];
+      const problems: string[] = [];
+      // Threaded through so each create lands after the last one, otherwise
+      // Google stacks them at the top and the order comes out reversed.
+      let previous: string | undefined;
+
+      for (const item of items) {
+        const title = S(item, "title");
+        if (!title) {
+          problems.push("skipped an entry with no title");
+          continue;
+        }
+        try {
+          const doneAt = S(item, "completed_at");
+          const due = S(item, "due");
+          const parentTask = await g.createTask(
+            env,
+            list.id,
+            {
+              title,
+              notes: S(item, "notes"),
+              due: due ? g.toDueDate(due) : undefined,
+              ...(doneAt ? { status: "completed" as const, completed: g.toTimestamp(doneAt) } : {}),
+            },
+            undefined,
+            previous,
+          );
+          previous = parentTask.id;
+          made.push(parentTask.title ?? title);
+
+          const children = Array.isArray(item.subtasks)
+            ? (item.subtasks as Record<string, unknown>[])
+            : [];
+          let previousChild: string | undefined;
+          for (const child of children) {
+            const childTitle = S(child, "title");
+            if (!childTitle) continue;
+            const childDone = S(child, "completed_at");
+            const created = await g.createTask(
+              env,
+              list.id,
+              {
+                title: childTitle,
+                notes: S(child, "notes"),
+                ...(childDone
+                  ? { status: "completed" as const, completed: g.toTimestamp(childDone) }
+                  : {}),
+              },
+              parentTask.id,
+              previousChild,
+            );
+            previousChild = created.id;
+            made.push(`  ${childTitle}`);
+          }
+        } catch (error) {
+          problems.push(`"${title}": ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      const summary = `Created ${made.length} item(s) in "${list.title}":\n${made.map((m) => `  ${m}`).join("\n")}`;
+      return text(problems.length === 0 ? summary : `${summary}\n\nProblems:\n  ${problems.join("\n  ")}`);
     }
 
     case "update_task": {

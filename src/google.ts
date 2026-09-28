@@ -124,24 +124,39 @@ export async function resolveList(env: Env, nameOrId: string): Promise<TaskList>
   return match;
 }
 
+/**
+ * Follows nextPageToken. Google caps a page at 100, and a long lived list can
+ * hold many times that once completed tasks are included, so a single page is
+ * not a safe read. `limit` is a stop, not a page size.
+ */
 export async function listTasks(
   env: Env,
   listId: string,
-  options: { showCompleted?: boolean; showHidden?: boolean; maxResults?: number } = {},
+  options: { showCompleted?: boolean; showHidden?: boolean; limit?: number } = {},
 ): Promise<Task[]> {
-  const data = await call<{ items?: Task[] }>(
-    env,
-    "GET",
-    `/lists/${encodeURIComponent(listId)}/tasks`,
-    {
-      query: {
-        maxResults: String(options.maxResults ?? 100),
-        showCompleted: String(options.showCompleted ?? false),
-        showHidden: String(options.showHidden ?? false),
+  const limit = options.limit ?? 2000;
+  const collected: Task[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const data = await call<{ items?: Task[]; nextPageToken?: string }>(
+      env,
+      "GET",
+      `/lists/${encodeURIComponent(listId)}/tasks`,
+      {
+        query: {
+          maxResults: "100",
+          showCompleted: String(options.showCompleted ?? false),
+          showHidden: String(options.showHidden ?? false),
+          pageToken,
+        },
       },
-    },
-  );
-  return data.items ?? [];
+    );
+    collected.push(...(data.items ?? []));
+    pageToken = data.nextPageToken;
+  } while (pageToken && collected.length < limit);
+
+  return collected.slice(0, limit);
 }
 
 export function getTask(env: Env, listId: string, taskId: string): Promise<Task> {
@@ -152,14 +167,20 @@ export function getTask(env: Env, listId: string, taskId: string): Promise<Task>
   );
 }
 
+/**
+ * `previous` is the id of the task this one should sit after. Without it
+ * Google inserts at the top, which reverses the order of a sequence of
+ * creates, so anything order sensitive should thread it through.
+ */
 export function createTask(
   env: Env,
   listId: string,
   body: Partial<Task>,
   parent?: string,
+  previous?: string,
 ): Promise<Task> {
   return call<Task>(env, "POST", `/lists/${encodeURIComponent(listId)}/tasks`, {
-    query: { parent },
+    query: { parent, previous },
     body,
   });
 }
@@ -207,6 +228,20 @@ export async function moveTask(
   });
   await deleteTask(env, fromListId, taskId);
   return copy;
+}
+
+/**
+ * A full RFC3339 timestamp, for the `completed` field. Unlike `due`, which
+ * Google truncates to a date, this keeps the time when one is supplied.
+ */
+export function toTimestamp(value: string): string {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return `${trimmed}T12:00:00.000Z`;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new GoogleError(`Could not read "${value}" as a date or timestamp.`, 400);
+  }
+  return parsed.toISOString();
 }
 
 /** Normalise "today", "tomorrow", "2026-10-02" into the RFC3339 Google wants. */
