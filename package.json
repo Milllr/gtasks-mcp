@@ -9,7 +9,9 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "token": "node scripts/get-refresh-token.mjs"
+    "setup": "node scripts/setup.mjs",
+    "token": "node scripts/get-refresh-token.mjs",
+    "smoke": "node scripts/smoke-test.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260925.1",

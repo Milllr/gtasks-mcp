@@ -51,50 +51,49 @@ every credential at once.
 
 7. Copy the client ID and client secret.
 
-### 2. Get a refresh token
+### 2. Run setup
 
 ```powershell
 cd C:\code\gtasks-mcp
 npm install
-node scripts/get-refresh-token.mjs
+npm run setup
 ```
 
-It opens your browser, you approve, and it prints a refresh token. Nothing is
-sent anywhere except to Google.
+That one command does the rest: it asks for your client ID and secret, runs the
+Google authorization flow in your browser, asks you to choose a connector
+password, pushes all four secrets to Cloudflare, redeploys, and smoke tests the
+result. Secret values are piped straight into wrangler, never written to disk
+and never printed back.
 
-### 3. Store the secrets
+`SIGNING_SECRET` is generated separately and only needs setting once:
 
 ```powershell
-npx wrangler secret put GOOGLE_CLIENT_ID
-npx wrangler secret put GOOGLE_CLIENT_SECRET
-npx wrangler secret put GOOGLE_REFRESH_TOKEN
-npx wrangler secret put MCP_PASSWORD     # you choose this, you type it when connecting
-npx wrangler secret put SIGNING_SECRET   # any long random string
+node -e "const b=crypto.getRandomValues(new Uint8Array(32));process.stdout.write(Buffer.from(b).toString('base64url'))" | npx wrangler secret put SIGNING_SECRET
 ```
 
-A decent signing secret:
+### 3. Connect Claude
 
-```powershell
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-```
-
-### 4. Deploy
-
-```powershell
-npx wrangler deploy
-```
-
-Visit the printed URL. It tells you whether every secret is set.
-
-### 5. Connect Claude
-
-In Claude, go to Settings, Connectors, Add custom connector, and paste:
+Setup prints the endpoint when it finishes. In Claude, go to Settings,
+Connectors, Add custom connector, and paste:
 
 ```
 https://gtasks-mcp.<your-subdomain>.workers.dev/mcp
 ```
 
-Claude opens a page asking for a password. That is your `MCP_PASSWORD`.
+Claude opens a page asking for a password. That is the one you chose.
+
+### Doing it by hand instead
+
+`npm run token` prints a refresh token and stops, which is what you want when
+rotating one later. Then set each secret yourself:
+
+```powershell
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put GOOGLE_REFRESH_TOKEN
+npx wrangler secret put MCP_PASSWORD
+npx wrangler deploy
+```
 
 ## Tools
 
