@@ -137,7 +137,7 @@ async function main() {
     })
   ).json();
   const tools = list.result?.tools ?? [];
-  check("tools/list", tools.length === 11, `${tools.length} tools`);
+  check("tools/list", tools.length === 13, `${tools.length} tools`);
 
   const refreshed = await (
     await fetch(`${base}/token`, {
