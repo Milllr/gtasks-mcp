@@ -10,3 +10,6 @@ migration-plan.json
 .DS_Store
 .env
 .env.*
+
+# the link to your own Infisical project (infisical init makes it)
+.infisical.json

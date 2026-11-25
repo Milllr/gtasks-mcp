@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Remote MCP server exposing Google Tasks to Claude, running on Cloudflare Workers",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
